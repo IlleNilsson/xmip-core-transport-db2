@@ -1,40 +1,57 @@
 # Its own workspace root, so this repository builds on its own.
-#
-# Every module repository carries this and the template did not, which stopped
-# mattering the moment the template stopped sitting beside the estate: nested at
-# template/rust, cargo walked up, found the root workspace and refused to build.
-#
-# It would have bitten a generated repository the same way. A template that does
-# not obey the estate's rules produces repositories that start out breaking
-# them — doc/governance/rust-style.md section 4.
 [workspace]
 
 [package]
-name = "xmip-template-rust"
+name = "xmip-core-transport-db2"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
-repository = "https://github.com/IlleNilsson/xmip-template-rust"
-description = "Starter template for a Rust Xmip module repository."
+repository = "https://github.com/IlleNilsson/xmip-core-transport-db2"
+description = "IBM DB2 transport: one row of a query is one Stream, a send is one INSERT; DRDA over TCP with the user ID and password security mechanism, TLS behind the tls feature. A xmip-core-transport technology."
 publish = false
 
 [lib]
 path = "src/lib.rs"
 
+[dependencies]
+# A Technology depends on its parent Capability, never the reverse
+# (repository-model.md). DRDA is DSS frames carrying DDM objects, with
+# FD:OCA describing the rows.
+transport = { package = "xmip-core-transport", git = "https://github.com/IlleNilsson/xmip-core-transport", branch = "main" }
+# The settings this technology declares (xcore::settings), read through
+# transport::Configured (ADR-0064, amendment 2026-09-26).
+xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main" }
+# The estate's encoding primitives: the byte cursor objects and rows are
+# read over, hex for a binary column, and the random correlation token.
+codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNilsson/xmip-core-library-codec", branch = "main" }
+# SQL: the DB2 dialect — its literals, its binary form, the INSERT a send
+# writes and a far end takes apart, and a statement's verb.
+sql = { package = "xmip-core-library-sql", git = "https://github.com/IlleNilsson/xmip-core-library-sql", branch = "main" }
+# The most a connection is read for (`net::MAX_BODY`), and a server's host
+# and default port (`net::authority`).
+net = { package = "xmip-core-library-net", git = "https://github.com/IlleNilsson/xmip-core-library-net", branch = "main" }
+# Optional, and only for `tls`: DRDA over the estate's TLS (ADR-0033), so a
+# forwarder on an edge device carries no TLS stack it does not speak.
+tls = { package = "xmip-core-library-tls", git = "https://github.com/IlleNilsson/xmip-core-library-tls", branch = "main", optional = true }
+
+[features]
+# TLS from the first byte, to the server's TLS port.
+tls = ["dep:tls", "transport/tls"]
+
+[dev-dependencies]
+# The loopback payloads the tests drive, from the capability's test
+# support and never a production build (ADR-0044).
+transport = { package = "xmip-core-transport", git = "https://github.com/IlleNilsson/xmip-core-transport", branch = "main", features = ["test-support"] }
+# A certificate for the TLS test, signed by the estate's own provisioning
+# (dogfooding: the node's self-signed source, not a third party's).
+provision = { package = "xmip-core-provision", git = "https://github.com/IlleNilsson/xmip-core-provision", branch = "main" }
+provision_self_signed = { package = "xmip-core-provision-self-signed", git = "https://github.com/IlleNilsson/xmip-core-provision-self-signed", branch = "main" }
+
 [lints.rust]
-# forbid, not deny: a module has no business writing unsafe. The one exception
-# in the estate is xmip-core-abi, which holds the extern "C" vtable over
-# include/xmip_module.h and lowers this to deny with a reason at the call site.
 unsafe_code = "forbid"
 
 [lints.clippy]
-# Warned, never denied. doc/governance/rust-style.md section 3: a function
-# length gate was tried in this estate's PowerShell and produced a sixteen-entry
-# waiver list while catching nothing. The number worth reading is branches, and
-# clippy prints both.
 too_many_lines = "warn"
-
-# The ones that catch real defects rather than taste.
 pedantic = { level = "warn", priority = -1 }
 missing_errors_doc = "warn"
 missing_panics_doc = "warn"
