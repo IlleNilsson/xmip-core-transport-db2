@@ -248,7 +248,7 @@ impl Transport for Db2Transport {
     /// logged in on the first receive; each row is a Stream, whole. Its
     /// verdict runs the `accept` statement where one is declared — on
     /// `Accepted`, never on `Refused` or `Failed`.
-    fn receive(&self) -> Result<Vec<Arrived>> {
+    fn receive_up_to(&self, most: usize) -> Result<Vec<Arrived>> {
         let result = self.connections.exchange(
             &Self::key(&self.server, &self.database),
             || self.connect(),
@@ -257,6 +257,7 @@ impl Transport for Db2Transport {
         let shared = Arc::new(self.clone());
         accept::arrivals(
             result.rows,
+            most,
             &self.refused,
             |name| format!("db2://{}/{}?row={name}", self.server, self.database),
             Clone::clone,
@@ -274,11 +275,16 @@ impl Transport for Db2Transport {
         )
     }
 
+    fn sending(&self) -> transport::Sending {
+        transport::Sending::Gathered("an INSERT carries the body as one literal in its statement")
+    }
+
     /// Insert the bytes as one column of one row — a binary string
     /// constant, or a string literal where the column is declared to hold
     /// text — committed, on the connection kept for the server and
     /// database.
-    fn send(&self, target: &str, bytes: &[u8]) -> Result<()> {
+    fn send_from(&self, target: &str, outgoing: transport::Outgoing<'_>) -> Result<()> {
+        let bytes: &[u8] = &outgoing.gather()?;
         let to = destination(SCHEMES, target, &self.server, &self.database)?;
         let literal = self.column.literal(bytes, &DB2)?;
         let insert = DB2.insert(to.table, to.column, &literal);
