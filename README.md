@@ -81,7 +81,7 @@ refused with what to do: name it in the query as
 
 A Send Location inserts on a connection logged in once per server and
 database and kept (`transport::Pool`); a Receive Location queries on one kept
-the same way. Rows are artefacts and this transport claims none of them
+the same way. Rows are artifacts and this transport claims none of them
 (ADR-0024).
 
 ## Verification
