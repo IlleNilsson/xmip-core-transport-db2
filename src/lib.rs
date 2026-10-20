@@ -28,7 +28,7 @@
 //! `tls = true`: TLS from the first byte, through `xmip-core-library-tls`
 //! (ADR-0033), behind the `tls` feature (`secured.rs`).
 //!
-//! Rows are artefacts and this transport claims none of them, per
+//! Rows are artifacts and this transport claims none of them, per
 //! ADR-0024: the claim a database has, `SELECT … FOR UPDATE SKIP LOCKED`,
 //! holds only inside a unit of work, and one receive commits its own.
 //!
@@ -295,7 +295,7 @@ impl Transport for Db2Transport {
         )
     }
 
-    /// Rows are artefacts, and one receive holds no unit of work to claim
+    /// Rows are artifacts, and one receive holds no unit of work to claim
     /// one in.
     fn claims(&self) -> Option<&dyn ResourceClaim> {
         Some(&NoNativeClaim)
@@ -561,7 +561,7 @@ mod tests {
             "{}",
             nobody.message
         );
-        assert!(far_end.claims().is_some(), "rows are artefacts");
+        assert!(far_end.claims().is_some(), "rows are artifacts");
         assert_eq!(far_end.name(), "db2");
         assert_eq!(far_end.directions(), Directions::BOTH);
     }
