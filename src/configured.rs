@@ -70,6 +70,9 @@ impl Configured for Db2Transport {
         ],
     };
 
+    /// The schemes a Location's address is entered with to choose this technology.
+    const SCHEMES: &'static [&'static str] = crate::SCHEMES;
+
     /// The password comes through the Location's credentials, never a
     /// setting.
     fn configured(address: &str, settings: &Read) -> Result<Self> {
