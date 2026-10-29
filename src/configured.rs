@@ -12,6 +12,12 @@ use crate::Secured;
 use crate::{DEFAULT_QUERY, Db2Transport};
 
 impl Configured for Db2Transport {
+    /// The password the Location's secret holds, read at each login.
+    fn secured_by(mut self, secret: transport::Secured) -> Result<Self> {
+        self.secret = Some(secret);
+        Ok(self)
+    }
+
     /// The address is the server's host and port: where a Location
     /// connects, port 50000 where it names none.
     const SETTINGS: &'static Settings = &Settings {
@@ -73,7 +79,7 @@ impl Configured for Db2Transport {
     /// The schemes a Location's address is entered with to choose this technology.
     const SCHEMES: &'static [&'static str] = crate::SCHEMES;
 
-    /// The password comes through the Location's credentials, never a
+    /// The password is the secret the Location names, never a
     /// setting.
     fn configured(address: &str, settings: &Read) -> Result<Self> {
         let mut transport = Self::new(address, settings.text("database"), settings.text("user"))

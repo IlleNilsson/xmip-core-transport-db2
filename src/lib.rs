@@ -99,6 +99,9 @@ const LOOPBACK_TARGET: &str = "PROBE/PAYLOAD";
 
 #[derive(Clone)]
 pub struct Db2Transport {
+    /// The secret its Location names, whose password the login presents,
+    /// read at each login (ADR-0019, amendment 2026-10-29).
+    secret: Option<transport::Secured>,
     server: String,
     database: String,
     login: Login,
@@ -127,6 +130,7 @@ impl Db2Transport {
         user: impl Into<String>,
     ) -> Self {
         Self {
+            secret: None,
             server: server.into(),
             database: database.into(),
             login: Login::new(user, ""),
@@ -197,11 +201,12 @@ impl Db2Transport {
 
     fn connect_to(&self, server: &str, database: &str) -> Result<Client> {
         let server = net::authority::with_default_port(server, PORT);
+        let login = transport::secured::logged_in(&self.login, self.secret.as_ref(), "db2")?;
         #[cfg(feature = "tls")]
         if let Some(secured) = &self.secured {
-            return Client::over(secured.wire(&server, self.timeout)?, database, &self.login);
+            return Client::over(secured.wire(&server, self.timeout)?, database, &login);
         }
-        Client::connect(&server, database, &self.login, self.timeout)
+        Client::connect(&server, database, &login, self.timeout)
     }
 
     /// Bind as the far end clients connect to, and report the address.
