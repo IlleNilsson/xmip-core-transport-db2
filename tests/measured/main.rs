@@ -1,0 +1,85 @@
+//! The module's timing program (`doc/governance/rust-style.md` section
+//! 5c): this transport held to how long Xmip takes — the millisecond rule
+//! (`CONTRIBUTING.md`, *Rust is here for one reason*). A plain `cargo test`
+//! leaves it out; the landing runs it after every other test of the module,
+//! alone, one test at a time
+//! (`cargo test --test measured --all-features -- --test-threads=1`), so
+//! what is measured is Xmip's work and not its neighbors':
+//!
+//! - a thousand inserts on one login take a millisecond each at most;
+//! - a thousand receives on one login take a millisecond each at most, a
+//!   query, its continuation and its commit.
+
+use std::time::{Duration, Instant};
+
+use transport::Transport;
+use xmip_core_transport_db2::{Db2Transport, Event};
+
+fn secs(n: u64) -> Duration {
+    Duration::from_secs(n)
+}
+
+/// The far end and the near end that logs in to it, both as `xmip`.
+fn ends() -> (Db2Transport, std::net::TcpListener, Db2Transport) {
+    let far_end = Db2Transport::new("127.0.0.1:0", "ORDERS", "xmip")
+        .with_password("secret")
+        .timing_out_after(secs(5));
+    let (listener, address) = far_end.bind().expect("binding");
+    let near = Db2Transport::new(address, "ORDERS", "xmip")
+        .with_password("secret")
+        .timing_out_after(secs(5));
+    (far_end, listener, near)
+}
+
+#[test]
+fn a_thousand_inserts_take_a_millisecond_each_at_most() {
+    const SENDS: usize = 1000;
+    let (far_end, listener, near) = ends();
+    let sender = std::thread::spawn(move || {
+        let began = Instant::now();
+        for n in 0..SENDS {
+            near.send("INBOX/PAYLOAD", n.to_string().as_bytes())?;
+        }
+        let took = began.elapsed();
+        // Generous for a debug build under load: a millisecond an insert.
+        assert!(took < Duration::from_millis(SENDS as u64), "{took:?}");
+        Ok::<_, transport::TransportError>(())
+    });
+    let mut session = far_end.accept_one(&listener).expect("accepting");
+    for n in 0..SENDS {
+        let inserted = session.next_insert().expect("insert").expect("one");
+        assert_eq!(inserted.bytes, n.to_string().as_bytes());
+    }
+    sender.join().expect("thread").expect("sending");
+}
+
+#[test]
+fn a_thousand_receives_take_a_millisecond_each_at_most() {
+    const RECEIVES: usize = 1000;
+    let (far_end, listener, near) = ends();
+    let receiver = std::thread::spawn(move || {
+        let began = Instant::now();
+        for _ in 0..RECEIVES {
+            assert_eq!(near.receive()?.len(), 1);
+        }
+        let took = began.elapsed();
+        // Generous for a debug build under load: a millisecond a query,
+        // its continuation and its commit.
+        assert!(took < Duration::from_millis(RECEIVES as u64), "{took:?}");
+        Ok::<_, transport::TransportError>(())
+    });
+    // Served until the near end lets its connection go, so the last
+    // query is continued and committed too.
+    let served = far_end
+        .accept_one(&listener)
+        .expect("a login")
+        .with_table(&["ID", "PAYLOAD"], &[&[Some("1"), None]])
+        .serve()
+        .expect("served");
+    receiver.join().expect("thread").expect("receiving");
+    let selected = served
+        .iter()
+        .filter(|event| matches!(event, Event::Selected(_)))
+        .count();
+    assert_eq!(selected, RECEIVES);
+}
