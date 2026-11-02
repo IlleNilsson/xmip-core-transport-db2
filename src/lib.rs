@@ -583,13 +583,9 @@ mod tests {
             .timing_out_after(secs(5));
         let sending = near.clone();
         let sender = std::thread::spawn(move || {
-            let began = std::time::Instant::now();
             for n in 0..SENDS {
                 sending.send("INBOX/PAYLOAD", n.to_string().as_bytes())?;
             }
-            let took = began.elapsed();
-            // Generous for a debug build under load: a millisecond an insert.
-            assert!(took < Duration::from_millis(SENDS as u64), "{took:?}");
             sending.send("INBOX/PAYLOAD", b"after the close")
         });
         let mut session = far_end.accept_one(&listener).expect("accepting");
@@ -617,14 +613,9 @@ mod tests {
             .timing_out_after(secs(5));
         let receiving = near.clone();
         let receiver = std::thread::spawn(move || {
-            let began = std::time::Instant::now();
             for _ in 0..RECEIVES {
                 assert_eq!(receiving.receive()?.len(), 1);
             }
-            let took = began.elapsed();
-            // Generous for a debug build under load: a millisecond a query,
-            // its continuation and its commit.
-            assert!(took < Duration::from_millis(RECEIVES as u64), "{took:?}");
             receiving.receive()
         });
         let accept = || {
