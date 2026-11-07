@@ -357,6 +357,7 @@ mod tests {
     use crate::ddm::Object;
     use crate::wire::{Chain, REPLY};
     use codec::unicode::Form;
+    use std::assert_matches;
     use transport::Configured;
     use transport::error::TransportError;
     use transport::payload::{edge_payloads, sized_payloads};
@@ -627,7 +628,7 @@ mod tests {
         let mut session = accept();
         for _ in 0..RECEIVES {
             let event = session.next_event().expect("query");
-            assert!(matches!(event, Some(Event::Selected(_))), "{event:?}");
+            assert_matches!(event, Some(Event::Selected(_)), "{event:?}");
         }
         drop(session);
         // A query is continued and committed after its event: the new
@@ -642,8 +643,9 @@ mod tests {
         let served = again.join().expect("thread").expect("served");
         // The first session was dropped before the last of its thousand
         // queries was continued, so that query went again on the new one.
-        assert!(
-            matches!(served.as_slice(), [Event::Selected(_), Event::Selected(_)]),
+        assert_matches!(
+            served.as_slice(),
+            [Event::Selected(_), Event::Selected(_)],
             "{served:?}"
         );
     }

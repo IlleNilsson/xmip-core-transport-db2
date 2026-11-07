@@ -88,7 +88,7 @@ impl Sqlca {
             return Ok(None);
         }
         let code = endian.i32(cursor)?;
-        let state = String::from_utf8_lossy(cursor.take(5)?).into_owned();
+        let state = String::from_utf8_lossy(cursor.take(5)?);
         cursor.skip(8)?;
         let mut area = Self::new(code, &state, "");
         if cursor.byte()? == 0xFF {
