@@ -101,25 +101,29 @@ impl Configured for Db2Transport {
 }
 
 impl Db2Transport {
-    /// TLS where `tls` says, checked for `name` where one is given.
-    #[cfg(feature = "tls")]
-    #[allow(clippy::unnecessary_wraps)]
-    fn guarded_as(self, tls: bool, name: Option<&str>) -> Result<Self> {
-        if !tls {
-            return Ok(self);
+    cfg_select! {
+        feature = "tls" => {
+            /// TLS where `tls` says, checked for `name` where one is given.
+            #[allow(clippy::unnecessary_wraps)]
+            fn guarded_as(self, tls: bool, name: Option<&str>) -> Result<Self> {
+                if !tls {
+                    return Ok(self);
+                }
+                let secured =
+                    name.map_or_else(Secured::native, |name| Secured::native().named(name));
+                Ok(self.secured(secured))
+            }
         }
-        let secured = name.map_or_else(Secured::native, |name| Secured::native().named(name));
-        Ok(self.secured(secured))
-    }
-
-    /// In the clear; `tls` refused, since this build carries no TLS.
-    #[cfg(not(feature = "tls"))]
-    fn guarded_as(self, tls: bool, _name: Option<&str>) -> Result<Self> {
-        if tls {
-            return Err(transport::TransportError::permanent(
-                "TLS needs the db2 transport built with its tls feature",
-            ));
+        _ => {
+            /// In the clear; `tls` refused, since this build carries no TLS.
+            fn guarded_as(self, tls: bool, _name: Option<&str>) -> Result<Self> {
+                if tls {
+                    return Err(transport::TransportError::permanent(
+                        "TLS needs the db2 transport built with its tls feature",
+                    ));
+                }
+                Ok(self)
+            }
         }
-        Ok(self)
     }
 }
