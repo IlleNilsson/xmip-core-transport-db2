@@ -67,10 +67,7 @@ impl Secured {
             .as_deref()
             .unwrap_or_else(|| net::authority::host_of(server));
         let under = clone(&socket)?;
-        let guarded = match &self.config {
-            Some(config) => tls::client_with(name, socket, Arc::clone(config))?,
-            None => tls::client(name, socket)?,
-        };
+        let guarded = tls::client_trusting(name, socket, self.config.as_ref())?;
         let halves = split(guarded)?;
         Ok(Wire::new(
             Box::new(halves.reading),
