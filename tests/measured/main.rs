@@ -13,7 +13,7 @@
 use std::time::{Duration, Instant};
 
 use transport::Transport;
-use xmip_core_transport_db2::{Db2Transport, Event};
+use xmip_core_transport_db2::{Db2Transport, Event, accept_one};
 
 fn secs(n: u64) -> Duration {
     Duration::from_secs(n)
@@ -45,7 +45,7 @@ fn a_thousand_inserts_take_a_millisecond_each_at_most() {
         assert!(took < Duration::from_millis(SENDS as u64), "{took:?}");
         Ok::<_, transport::TransportError>(())
     });
-    let mut session = far_end.accept_one(&listener).expect("accepting");
+    let mut session = accept_one(&far_end, &listener).expect("accepting");
     for n in 0..SENDS {
         let inserted = session.next_insert().expect("insert").expect("one");
         assert_eq!(inserted.bytes, n.to_string().as_bytes());
@@ -70,8 +70,7 @@ fn a_thousand_receives_take_a_millisecond_each_at_most() {
     });
     // Served until the near end lets its connection go, so the last
     // query is continued and committed too.
-    let served = far_end
-        .accept_one(&listener)
+    let served = accept_one(&far_end, &listener)
         .expect("a login")
         .with_table(&["ID", "PAYLOAD"], &[&[Some("1"), None]])
         .serve()

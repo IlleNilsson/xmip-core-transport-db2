@@ -6,6 +6,11 @@ the estate's own behind the `tls` feature. A technology of
 [xmip-core-transport](https://github.com/IlleNilsson/xmip-core-transport).
 A transport only: DB2 is never a Xmip Storage server.
 
+The transport is every SQL technology's, `transport::sql::SqlTransport`, over
+this crate's `Db2` wire (2026-11-13): its name and scheme, its settings, the
+DB2 dialect, the port 50000, the TLS a connection is guarded by, and DRDA,
+both halves, which stays here (`accept_one` serves the far end).
+
 ## The wire
 
 DRDA, The Open Group's Distributed Relational Database Architecture,
@@ -21,7 +26,8 @@ address names another.
   the password as it is, so a Location that crosses a network says
   `tls = true`: TLS from the first byte to the server's TLS port
   (`SSL_SVCENAME`), the certificate checked against the operating system's
-  trust store, for `tls_name` where given (ADR-0033). The mechanisms that
+  trust store, for `tls_name` where given, as the estate's
+  `tls::ClientSettings` says (ADR-0033). The mechanisms that
   encrypt the password inside DRDA (`EUSRIDPWD`, 9) key DES or AES with an
   anonymous Diffie-Hellman exchange that authenticates neither side, and IBM
   marks the server's `SERVER_ENCRYPT` deprecated in favor of TLS; they are not

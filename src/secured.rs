@@ -18,63 +18,27 @@ use transport::{Login, socket};
 use crate::session::Session;
 use crate::wire::Wire;
 
-/// How a client guards its connection: the trust its server's certificate
-/// is checked against, and the name it is checked for.
-#[derive(Clone)]
-pub struct Secured {
-    /// The name the certificate must carry; the address's host where `None`.
-    name: Option<String>,
-    /// The trust a caller holds; the operating system's store where `None`.
-    config: Option<Arc<tls::ClientConfig>>,
-}
-
-impl Secured {
-    /// Checked against the operating system's trust store, for the
-    /// address's host.
-    #[must_use]
-    pub const fn native() -> Self {
-        Self {
-            name: None,
-            config: None,
-        }
-    }
-
-    /// Checked against the trust `config` holds.
-    #[must_use]
-    pub fn trusting(config: Arc<tls::ClientConfig>) -> Self {
-        Self {
-            name: None,
-            config: Some(config),
-        }
-    }
-
-    /// Checked for `name` rather than the address's host.
-    #[must_use]
-    pub fn named(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into());
-        self
-    }
-
-    /// A guarded connection to `server`.
-    ///
-    /// # Errors
-    /// Where the server could not be reached or the handshake failed, the
-    /// server's certificate among the reasons.
-    pub fn wire(&self, server: &str, timeout: Option<Duration>) -> Result<Wire> {
-        let socket = socket::connect_tcp(server, timeout)?;
-        let name = self
-            .name
-            .as_deref()
-            .unwrap_or_else(|| net::authority::host_of(server));
-        let under = clone(&socket)?;
-        let guarded = tls::client_trusting(name, socket, self.config.as_ref())?;
-        let halves = split(guarded)?;
-        Ok(Wire::new(
-            Box::new(halves.reading),
-            Box::new(halves.writing),
-            under,
-        ))
-    }
+/// A guarded connection to `server`, its certificate checked as `settings`
+/// say: the estate's one pair of trust store and name
+/// (`tls::ClientSettings`).
+///
+/// # Errors
+/// Where the server could not be reached or the handshake failed, the
+/// server's certificate among the reasons.
+pub fn wire(
+    settings: &tls::ClientSettings,
+    server: &str,
+    timeout: Option<Duration>,
+) -> Result<Wire> {
+    let socket = socket::connect_tcp(server, timeout)?;
+    let under = clone(&socket)?;
+    let guarded = settings.client(net::authority::host_of(server), socket)?;
+    let halves = split(guarded)?;
+    Ok(Wire::new(
+        Box::new(halves.reading),
+        Box::new(halves.writing),
+        under,
+    ))
 }
 
 /// Accept one client on `listener` over TLS with `config`, and log it in
