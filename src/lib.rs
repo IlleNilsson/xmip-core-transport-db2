@@ -48,6 +48,13 @@
 //! configured server and database. The table and column are always quoted,
 //! so they name what the catalog holds: `INBOX/PAYLOAD` for a table
 //! created as `inbox`.
+//!
+//! **The transport is every SQL technology's**, `transport::sql`'s
+//! `SqlTransport` over this crate's [`Db2`] wire (2026-11-13): the query
+//! and its rows, the `accept` statement after a row's cycle, the INSERT a
+//! send writes, the connections kept per server and database, the
+//! settings. What is DB2's own is this crate's: its dialect, the port
+//! 50000, the TLS a connection is guarded by, and DRDA, both halves.
 
 mod admission;
 pub mod client;
@@ -65,289 +72,109 @@ pub mod statement;
 pub mod wire;
 
 use std::net::TcpListener;
-use std::sync::Arc;
 use std::time::Duration;
 
 pub use client::{Client, QueryResult};
-#[cfg(feature = "tls")]
-pub use secured::Secured;
 pub use session::{Answer, Event, Session};
-use sql::DB2;
-use transport::ArrivalIdentity;
-use transport::claim::{NoNativeClaim, ResourceClaim};
+use sql::{DB2, Dialect};
 use transport::error::{Result, protocol_error};
-use transport::listening::{Accepting, Listening};
-use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
-use transport::socket;
-use transport::sql::{Column, accept, destination};
-use transport::{Arrived, Directions, Login, Pool, Taken, Transport};
-
-/// The schemes a send target may open with.
-const SCHEMES: &[&str] = &["db2"];
+use transport::sql::{Probe, Rows, SqlTransport};
+use transport::{Login, Pooled, Taken};
+use xcore::settings::{Read, Settings};
 
 /// The port a DB2 server listens on unless told otherwise.
 pub const PORT: u16 = 50_000;
 
-/// What a Receive Location runs unless told otherwise.
-pub const DEFAULT_QUERY: &str = "SELECT id, payload FROM inbox ORDER BY id";
+/// A Location over an IBM DB2 server.
+pub type Db2Transport = SqlTransport<Db2>;
 
-/// What the loopback pair agrees on: one database, one user with no
-/// password, one table and column the payload is inserted into.
-const LOOPBACK_DATABASE: &str = "PROBE";
-const LOOPBACK_USER: &str = "xmip";
-const LOOPBACK_TARGET: &str = "PROBE/PAYLOAD";
-
-#[derive(Clone)]
-pub struct Db2Transport {
-    /// The secret its Location names, whose password the login presents,
-    /// read at each login (ADR-0019, amendment 2026-10-29).
-    secret: Option<transport::Secured>,
-    server: String,
-    database: String,
-    login: Login,
-    query: String,
-    /// The statement run on a row's verdict, its name bound in.
-    accept: Option<String>,
-    /// The rows refused and left, not received again while unchanged.
-    refused: accept::RefusedRows,
-    column: Column,
-    timeout: Option<Duration>,
+/// DB2's wire: this crate's DRDA client, guarded by TLS where asked for.
+#[derive(Clone, Default)]
+pub struct Db2 {
     /// How a connection is guarded; in the clear where `None`.
     #[cfg(feature = "tls")]
-    secured: Option<Secured>,
-    /// The connections a send inserts on and a receive queries on, logged
-    /// in once per server and database and kept.
-    connections: Pool<Client>,
+    secured: Option<tls::ClientSettings>,
 }
 
-impl Db2Transport {
-    /// Speak to the server at `server`, on `database`, as `user` with no
-    /// password until one is given.
-    #[must_use]
-    pub fn new(
-        server: impl Into<String>,
-        database: impl Into<String>,
-        user: impl Into<String>,
-    ) -> Self {
-        Self {
-            secret: None,
-            server: server.into(),
-            database: database.into(),
-            login: Login::new(user, ""),
-            query: DEFAULT_QUERY.to_string(),
-            accept: None,
-            refused: accept::RefusedRows::default(),
-            column: Column::Binary,
-            timeout: None,
-            #[cfg(feature = "tls")]
-            secured: None,
-            connections: Pool::new(),
-        }
-    }
-
-    /// The password the login sends.
-    #[must_use]
-    pub fn with_password(mut self, password: impl Into<String>) -> Self {
-        self.login.password = password.into();
-        self
-    }
-
-    /// The query a receive runs: the first column is the row's name, the
-    /// last is the Stream.
-    #[must_use]
-    pub fn with_query(mut self, query: impl Into<String>) -> Self {
-        self.query = query.into();
-        self
-    }
-
-    /// The statement run once a row's cycle accepted it, the row's name in
-    /// place of `?` (`transport::sql::accept`).
-    #[must_use]
-    pub fn with_accept(mut self, statement: impl Into<String>) -> Self {
-        self.accept = Some(statement.into());
-        self
-    }
-
-    /// What the payload column holds: bytes unless declared otherwise.
-    #[must_use]
-    pub const fn holding(mut self, column: Column) -> Self {
-        self.column = column;
-        self
-    }
-
-    /// Give up on a server that stops mid-answer.
-    #[must_use]
-    pub const fn timing_out_after(mut self, timeout: Duration) -> Self {
-        self.timeout = Some(timeout);
-        self
-    }
-
+impl Db2 {
     /// Every connection guarded by TLS, the server's certificate checked as
     /// `secured` says.
     #[cfg(feature = "tls")]
     #[must_use]
-    pub fn secured(mut self, secured: Secured) -> Self {
-        self.secured = Some(secured);
-        self
-    }
-
-    /// Log in to the server.
-    ///
-    /// # Errors
-    /// Where the server could not be reached or refused the login.
-    pub fn connect(&self) -> Result<Client> {
-        self.connect_to(&self.server, &self.database)
-    }
-
-    fn connect_to(&self, server: &str, database: &str) -> Result<Client> {
-        let server = net::authority::with_default_port(server, PORT);
-        let login = transport::secured::logged_in(&self.login, self.secret.as_ref(), "db2")?;
-        #[cfg(feature = "tls")]
-        if let Some(secured) = &self.secured {
-            return Client::over(secured.wire(&server, self.timeout)?, database, &login);
+    pub const fn secured(secured: tls::ClientSettings) -> Self {
+        Self {
+            secured: Some(secured),
         }
-        Client::connect(&server, database, &login, self.timeout)
-    }
-
-    /// Bind as the far end clients connect to, and report the address.
-    ///
-    /// # Errors
-    /// Where the address is taken, malformed, or not permitted.
-    pub fn bind(&self) -> Result<(TcpListener, String)> {
-        socket::bind_tcp(&self.server)
-    }
-
-    /// Accept one client on an already-bound listener, demanding this
-    /// transport's user and password.
-    ///
-    /// # Errors
-    /// Where the connection could not be accepted or the login failed.
-    pub fn accept_one(&self, listener: &TcpListener) -> Result<Session> {
-        Session::accept(listener, &self.login, self.timeout)
-            .map(|session| session.holding(self.column))
-    }
-
-    fn key(server: &str, database: &str) -> String {
-        format!("{server}/{database}")
     }
 }
 
-impl Transport for Db2Transport {
-    fn name(&self) -> &'static str {
-        "db2"
+impl transport::sql::Wire for Db2 {
+    type Client = Client;
+
+    const NAME: &'static str = "db2";
+    const SCHEMES: &'static [&'static str] = &["db2"];
+    const SETTINGS: &'static Settings = configured::SETTINGS;
+    /// One database, one user with no password.
+    const PROBE: Probe = Probe {
+        database: "PROBE",
+        user: "xmip",
+        password: "",
+        target: "PROBE/PAYLOAD",
+    };
+
+    fn dialect() -> &'static Dialect {
+        &DB2
     }
 
-    fn directions(&self) -> Directions {
-        Directions::BOTH
+    fn configured(self, settings: &Read) -> Result<Self> {
+        configured::wire(settings)
     }
 
-    fn arrivals(&self) -> transport::Arrivals {
-        transport::Arrivals::Ordered("a poll reads again what is not yet told")
+    /// `server`, port 50000 where it names none, guarded where asked for.
+    fn connect(
+        &self,
+        server: &str,
+        database: &str,
+        login: &Login,
+        timeout: Option<Duration>,
+    ) -> Result<Client> {
+        let server = net::authority::with_default_port(server, PORT);
+        #[cfg(feature = "tls")]
+        if let Some(settings) = &self.secured {
+            return Client::over(secured::wire(settings, &server, timeout)?, database, login);
+        }
+        Client::connect(&server, database, login, timeout)
     }
 
-    fn waiting(&self) -> transport::Waiting {
-        transport::Waiting::Polled("a receive runs the query and returns")
+    fn usable(client: &mut Client) -> bool {
+        client.usable()
     }
 
-    /// Run the query on the connection kept for the server and database,
-    /// logged in on the first receive; each row is a Stream, whole. Its
-    /// verdict runs the `accept` statement where one is declared — on
-    /// `Accepted`, never on `Refused` or `Failed`.
-    fn receive_up_to(&self, most: usize) -> Result<Vec<Arrived>> {
-        let result = self.connections.exchange(
-            &Self::key(&self.server, &self.database),
-            || self.connect(),
-            |client| client.query(&self.query),
-        )?;
-        let shared = Arc::new(self.clone());
-        accept::arrivals(
-            result.rows,
-            most,
-            &self.refused,
-            |name| format!("db2://{}/{}?row={name}", self.server, self.database),
-            Clone::clone,
-            |value| self.column.bytes(&value, &DB2),
-            |name| {
-                let transport = Arc::clone(&shared);
-                accept::accepting(&DB2, self.accept.as_deref(), name, move |sql| {
-                    transport.connections.exchange(
-                        &Self::key(&transport.server, &transport.database),
-                        || transport.connect(),
-                        |client| client.execute(sql).map(|_| ()),
-                    )
-                })
-            },
-        )
+    /// Each row's columns as text, the last the Stream.
+    fn query(client: &mut Client, sql: &str) -> Result<Rows<String>> {
+        Ok(client.query(sql)?.rows)
     }
 
-    fn sending(&self) -> transport::Sending {
-        transport::Sending::Gathered("an INSERT carries the body as one literal in its statement")
+    fn execute(client: &mut Client, sql: &str) -> Result<()> {
+        client.execute(sql).map(|_| ())
     }
 
-    /// Insert the bytes as one column of one row — a binary string
-    /// constant, or a string literal where the column is declared to hold
-    /// text — committed, on the connection kept for the server and
-    /// database.
-    fn send_from(&self, target: &str, outgoing: transport::Outgoing<'_>) -> Result<()> {
-        let bytes: &[u8] = &outgoing.gather()?;
-        let to = destination(SCHEMES, target, &self.server, &self.database)?;
-        let literal = self.column.literal(bytes, &DB2)?;
-        let insert = DB2.insert(to.table, to.column, &literal);
-        self.connections.exchange(
-            &Self::key(to.server, to.database),
-            || self.connect_to(to.server, to.database),
-            |client| client.execute(&insert).map(|_| ()),
-        )
-    }
-
-    /// Rows are artifacts, and one receive holds no unit of work to claim
-    /// one in.
-    fn claims(&self) -> Option<&dyn ResourceClaim> {
-        Some(&NoNativeClaim)
-    }
-}
-
-impl Db2Transport {
-    /// Both ends on this machine: an ephemeral local port, a login with no
-    /// password, the loopback timeout.
-    #[must_use]
-    pub fn loopback() -> Self {
-        Self::new("127.0.0.1:0", LOOPBACK_DATABASE, LOOPBACK_USER)
-            .timing_out_after(LOOPBACK_TIMEOUT)
-    }
-}
-
-impl Accepting for Db2Transport {
-    fn take_one(self, listener: &TcpListener) -> Result<Taken> {
-        // The client keeps its connection for the next insert.
-        self.accept_one(listener)?
+    /// The client keeps its connection for the next insert.
+    fn take_one(transport: &Db2Transport, listener: &TcpListener) -> Result<Taken> {
+        accept_one(transport, listener)?
             .next_insert()?
             .ok_or_else(|| protocol_error("the client closed without inserting"))
     }
 }
 
-impl Loopback for Db2Transport {
-    fn arrival_identity(&self) -> ArrivalIdentity {
-        ArrivalIdentity::Unnamed(
-            "a row names no sender: the database it was read from is in its origin",
-        )
-    }
-
-    fn far_end(&self) -> Result<Box<dyn FarEnd>> {
-        Ok(Box::new(Listening::new(self.clone(), self.bind()?)))
-    }
-
-    /// INSERT the payload as one column of one row, as the column is
-    /// declared to hold it, from a fresh near end logging in to `address`
-    /// as this transport does.
-    fn send_to(&self, address: &str, payload: &[u8]) -> Result<()> {
-        let near = Self {
-            server: address.to_string(),
-            connections: Pool::new(),
-            ..self.clone()
-        };
-        near.send(LOOPBACK_TARGET, payload)
-    }
+/// Accept one client on a listener `transport` bound, demanding its user
+/// and password.
+///
+/// # Errors
+/// Where the connection could not be accepted or the login failed.
+pub fn accept_one(transport: &Db2Transport, listener: &TcpListener) -> Result<Session> {
+    Session::accept(listener, transport.login(), transport.timeout())
+        .map(|session| session.holding(transport.column()))
 }
 
 #[cfg(test)]
@@ -358,9 +185,13 @@ mod tests {
     use crate::wire::{Chain, REPLY};
     use codec::unicode::Form;
     use std::assert_matches;
+    #[cfg(feature = "tls")]
+    use std::sync::Arc;
     use transport::Configured;
     use transport::error::TransportError;
     use transport::payload::{edge_payloads, sized_payloads};
+    use transport::sql::{Column, DEFAULT_QUERY};
+    use transport::{Arrived, Directions, Loopback, Transport};
     use xcore::settings::Applies;
 
     fn secs(n: u64) -> Duration {
@@ -378,18 +209,22 @@ mod tests {
             text("timeout", "2s"),
         ];
         let built = Db2Transport::open("db:50000", Applies::Receive, &given).expect("built");
-        assert_eq!(built.server, "db:50000");
-        assert_eq!(built.database, "ORDERS");
-        assert_eq!(built.query, DEFAULT_QUERY);
-        assert_eq!(built.timeout, Some(secs(2)));
-        assert_eq!(built.column, Column::Binary, "bytes unless declared");
+        assert_eq!(built.server(), "db:50000");
+        assert_eq!(built.database(), "ORDERS");
+        assert_eq!(built.query(), DEFAULT_QUERY);
+        assert_eq!(built.timeout(), Some(secs(2)));
+        assert_eq!(built.column(), Column::Binary, "bytes unless declared");
         let texts = [
             text("database", "ORDERS"),
             text("user", "xmip"),
             text("column", "text"),
         ];
         let built = Db2Transport::open("db:50000", Applies::Send, &texts).expect("text");
-        assert_eq!(built.column, Column::Text(Form::Utf8), "utf-8 unless named");
+        assert_eq!(
+            built.column(),
+            Column::Text(Form::Utf8),
+            "utf-8 unless named"
+        );
         let Err(refused) = Db2Transport::open("db:50000", Applies::Send, &given[1..]) else {
             panic!("database is required");
         };
@@ -434,8 +269,7 @@ mod tests {
             &[Some("43"), Some("63")],
             &[None, Some("64")],
         ];
-        let mut session = far_end
-            .accept_one(&listener)
+        let mut session = accept_one(&far_end, &listener)
             .expect("accepting")
             .with_table(&["ID", "PAYLOAD"], &rows);
         let mut events = Vec::new();
@@ -480,8 +314,7 @@ mod tests {
             &[Some("42"), None, Some("FFFE")],
             &[None, Some(""), None],
         ];
-        let mut session = far_end
-            .accept_one(&listener)
+        let mut session = accept_one(&far_end, &listener)
             .expect("accepting")
             .with_table(&["ID", "KIND", "PAYLOAD"], &rows);
         assert_eq!(session.user(), "xmip");
@@ -492,8 +325,7 @@ mod tests {
             Event::Selected("SELECT id, kind, payload FROM inbox ORDER BY id".into())
         );
         assert!(session.next_event().expect("ended").is_none());
-        let mut session = far_end
-            .accept_one(&listener)
+        let mut session = accept_one(&far_end, &listener)
             .expect("the text column")
             .with_table(&["ID", "PAYLOAD"], &[&[Some("43"), Some("fffe")]]);
         while session.next_event().expect("event").is_some() {}
@@ -539,7 +371,7 @@ mod tests {
                 .send("INBOX/PAYLOAD", b"x");
             Ok::<_, TransportError>((bad_target, refused, nobody))
         });
-        let mut session = far_end.accept_one(&listener).expect("accepting");
+        let mut session = accept_one(&far_end, &listener).expect("accepting");
         let first = session.next_insert().expect("first").expect("one");
         assert_eq!(first.bytes, b"it's \\here");
         assert!(first.origin_uri.ends_with("/ORDERS/INBOX/PAYLOAD"));
@@ -548,9 +380,11 @@ mod tests {
         assert!(second.origin_uri.ends_with("/ORDERS/OUTBOX/BODY"));
         let binary = session.next_insert().expect("third").expect("one");
         assert_eq!(binary.bytes, [0xff, 0xfe], "a binary column, so BX'…'");
-        let error = far_end.accept_one(&listener).err().expect("wrong password");
+        let error = accept_one(&far_end, &listener)
+            .err()
+            .expect("wrong password");
         assert!(error.message.contains("0x0f"), "{}", error.message);
-        let error = far_end.accept_one(&listener).err().expect("wrong user");
+        let error = accept_one(&far_end, &listener).err().expect("wrong user");
         assert!(error.message.contains("\"nobody\""), "{}", error.message);
         let (bad_target, refused, nobody) = sender.join().expect("thread").expect("sending");
         assert!(!bad_target.expect_err("not a column").retryable);
@@ -589,17 +423,17 @@ mod tests {
             }
             sending.send("INBOX/PAYLOAD", b"after the close")
         });
-        let mut session = far_end.accept_one(&listener).expect("accepting");
+        let mut session = accept_one(&far_end, &listener).expect("accepting");
         for n in 0..SENDS {
             let inserted = session.next_insert().expect("insert").expect("one");
             assert_eq!(inserted.bytes, n.to_string().as_bytes());
         }
         drop(session);
-        let mut again = far_end.accept_one(&listener).expect("a new login");
+        let mut again = accept_one(&far_end, &listener).expect("a new login");
         let last = again.next_insert().expect("insert").expect("one");
         assert_eq!(last.bytes, b"after the close");
         sender.join().expect("thread").expect("sending");
-        assert_eq!(near.connections.opened(), 2);
+        assert_eq!(near.opened(), 2);
     }
 
     #[test]
@@ -620,8 +454,7 @@ mod tests {
             receiving.receive()
         });
         let accept = || {
-            far_end
-                .accept_one(&listener)
+            accept_one(&far_end, &listener)
                 .expect("a login")
                 .with_table(&["ID", "PAYLOAD"], &[&[Some("1"), None]])
         };
@@ -638,7 +471,7 @@ mod tests {
             move || again.serve()
         });
         assert_eq!(receiver.join().expect("thread").expect("after").len(), 1);
-        assert_eq!(near.connections.opened(), 2);
+        assert_eq!(near.opened(), 2);
         drop(near);
         let served = again.join().expect("thread").expect("served");
         // The first session was dropped before the last of its thousand
@@ -678,8 +511,7 @@ mod tests {
             client.close()?;
             Ok::<_, TransportError>((failed, deleted, version))
         });
-        let session = far_end
-            .accept_one(&listener)
+        let session = accept_one(&far_end, &listener)
             .expect("accepting")
             .answering(|sql| {
                 sql.starts_with("SELECT").then(|| Answer::Error {
@@ -689,8 +521,7 @@ mod tests {
                 })
             });
         assert_eq!(session.serve().expect("served").len(), 1);
-        let session = far_end
-            .accept_one(&listener)
+        let session = accept_one(&far_end, &listener)
             .expect("again")
             .answering(|sql| sql.starts_with("DELETE").then_some(Answer::Complete(3)));
         assert_eq!(
@@ -791,7 +622,9 @@ mod tests {
         let near = Db2Transport::new(address, "ORDERS", "xmip")
             .with_password("secret")
             .timing_out_after(secs(5))
-            .secured(Secured::trusting(Arc::new(client)).named("localhost"));
+            .with_wire(Db2::secured(
+                tls::ClientSettings::trusting(Arc::new(client)).named("localhost"),
+            ));
         let sender = std::thread::spawn(move || near.send("INBOX/PAYLOAD", b"UNB+UNOC"));
         let login = Login::new("xmip", "secret");
         let mut session = secured::accept(&listener, &login, Some(secs(5)), &Arc::new(server))
