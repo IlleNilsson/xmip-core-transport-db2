@@ -187,8 +187,7 @@ fn float(bytes: &[u8], endian: Endian) -> String {
     match <[u8; 8]>::try_from(ordered.as_slice()) {
         Ok(eight) => f64::from_be_bytes(eight).to_string(),
         Err(_) => <[u8; 4]>::try_from(ordered.as_slice())
-            .map(|four| f32::from_be_bytes(four).to_string())
-            .unwrap_or_default(),
+            .map_or_default(|four| f32::from_be_bytes(four).to_string()),
     }
 }
 

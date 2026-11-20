@@ -264,8 +264,7 @@ pub fn failure(objects: &[Object], endian: Endian) -> Option<TransportError> {
     let message = objects.iter().find(|object| object.severity() >= 8)?;
     let diagnosis = message
         .parameter(SRVDGN)
-        .map(|text| format!(": {}", String::from_utf8_lossy(&text)))
-        .unwrap_or_default();
+        .map_or_default(|text| format!(": {}", String::from_utf8_lossy(&text)));
     Some(TransportError::permanent(format!(
         "the server answered {} ({:#06x}) with severity {}{diagnosis}",
         named(message.codepoint),
