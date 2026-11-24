@@ -1,5 +1,5 @@
 //! The server's side of one connection: what a test puts at the far end,
-//! and what the essentials drives.
+//! and what the System Tests drive.
 //!
 //! Not a database. One session does the login for one client — security
 //! mechanism 3 checked against the one user and password it expects — and
