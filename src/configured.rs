@@ -1,39 +1,14 @@
-//! The settings a DB2 Location declares (`xcore::settings`, read through
-//! `transport::Configured`, ADR-0064): what every SQL Location declares
-//! (`transport::sql`), and whether its connections are guarded by TLS,
-//! read by `transport::sql::client_tls`.
+//! How a DB2 Location is configured through its
+//! [`declaration`](crate::declaration) (ADR-0064, amendments 2026-09-26 and
+//! 2026-11-26): whether its connections are guarded by TLS, `tls` and
+//! `tls_name` read by `transport::sql::client_tls`.
 
 use transport::error::Result;
-use transport::sql::accept::ACCEPT;
-use transport::sql::{COLUMN, DATABASE, ENCODING, QUERY, TIMEOUT, TLS, TLS_NAME, USER};
-use xcore::settings::{Applies, Fixed, Kind, Presence, Read, Setting, Settings};
+#[cfg(not(feature = "tls"))]
+use transport::sql::TLS;
+use xcore::settings::Read;
 
 use crate::Db2;
-
-/// Every setting a DB2 Location takes beyond its address, the server's
-/// host and port, port 50000 where it names none.
-pub const SETTINGS: &Settings = &Settings {
-    technology: env!("CARGO_PKG_NAME"),
-    settings: &[
-        DATABASE,
-        USER,
-        QUERY,
-        ACCEPT,
-        COLUMN,
-        ENCODING,
-        TIMEOUT,
-        Setting {
-            name: TLS,
-            kind: Kind::Boolean,
-            presence: Presence::Default(Fixed::Boolean(false)),
-            meaning: "TLS from the first byte, to the server's TLS port, its certificate \
-                      checked against the operating system's trust store; the password \
-                      crosses the wire in the clear without it.",
-            applies: Applies::Both,
-        },
-        TLS_NAME,
-    ],
-};
 
 cfg_select! {
     feature = "tls" => {

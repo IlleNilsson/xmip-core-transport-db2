@@ -13,27 +13,37 @@ path = "src/lib.rs"
 [dependencies]
 # A Technology depends on its parent Capability, never the reverse
 # (repository-model.md). DRDA is DSS frames carrying DDM objects, with
-# FD:OCA describing the rows.
+# FD:OCA describing the rows. Its declaration takes what every SQL Location
+# declares (`transport::sql`).
 transport = { package = "xmip-core-transport", git = "https://github.com/IlleNilsson/xmip-core-transport", branch = "main" }
 # The settings this technology declares (xcore::settings), read through
 # transport::Configured (ADR-0064, amendment 2026-09-26).
 xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main" }
 # The estate's encoding primitives: the byte cursor objects and rows are
 # read over, hex for a binary column, and the random correlation token.
-codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNilsson/xmip-core-library-codec", branch = "main" }
+codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNilsson/xmip-core-library-codec", branch = "main", optional = true }
 # SQL: the DB2 dialect — its literals, its binary form, the INSERT a send
 # writes and a far end takes apart, and a statement's verb.
-sql = { package = "xmip-core-library-sql", git = "https://github.com/IlleNilsson/xmip-core-library-sql", branch = "main" }
+sql = { package = "xmip-core-library-sql", git = "https://github.com/IlleNilsson/xmip-core-library-sql", branch = "main", optional = true }
 # The most a connection is read for (`net::MAX_BODY`), and a server's host
 # and default port (`net::authority`).
-net = { package = "xmip-core-library-net", git = "https://github.com/IlleNilsson/xmip-core-library-net", branch = "main" }
+net = { package = "xmip-core-library-net", git = "https://github.com/IlleNilsson/xmip-core-library-net", branch = "main", optional = true }
 # Optional, and only for `tls`: DRDA over the estate's TLS (ADR-0033), so a
 # forwarder on an edge device carries no TLS stack it does not speak.
 tls = { package = "xmip-core-library-tls", git = "https://github.com/IlleNilsson/xmip-core-library-tls", branch = "main", optional = true }
 
 [features]
-# TLS from the first byte, to the server's TLS port.
-tls = ["dep:tls", "transport/tls"]
+# The technology: its code, everything it is built on, and its declaration.
+# Without it the crate is its declaration alone (ADR-0064, amendments
+# 2026-10-22 and 2026-11-26).
+default = ["declaration", "dep:codec", "dep:sql", "dep:net"]
+# The declaration alone: what a Location of this technology is configured
+# with, `declaration::SETTINGS` and `SCHEMES`, and none of
+# the code — what the surfaces' library is to carry (open problem 48).
+declaration = []
+# TLS from the first byte, to the server's TLS port; the technology's code,
+# so the default with it.
+tls = ["default", "dep:tls", "transport/tls"]
 
 # The module's timing program (doc/governance/rust-style.md section 5c): a
 # plain cargo test leaves it out, and the landing runs it after every other

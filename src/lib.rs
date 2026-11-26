@@ -55,40 +55,71 @@
 //! send writes, the connections kept per server and database, the
 //! settings. What is DB2's own is this crate's: its dialect, the port
 //! 50000, the TLS a connection is guarded by, and DRDA, both halves.
+//!
+//! **Built with its `declaration` feature alone** the crate is
+//! [`declaration`], what a Location of it is configured with, and none of
+//! the code above, which is behind the default feature: what the surfaces'
+//! library carries (ADR-0064, amendment 2026-11-26).
 
+#[cfg(feature = "default")]
 mod admission;
+#[cfg(feature = "default")]
 pub mod client;
+#[cfg(feature = "default")]
 pub mod codepoint;
+#[cfg(feature = "default")]
 mod configured;
+#[cfg(feature = "default")]
 pub mod ddm;
+#[cfg(feature = "declaration")]
+pub mod declaration;
+#[cfg(feature = "default")]
 pub mod ebcdic;
+#[cfg(feature = "default")]
 pub mod login;
+#[cfg(feature = "default")]
 pub mod row;
 #[cfg(feature = "tls")]
 pub mod secured;
+#[cfg(feature = "default")]
 pub mod session;
+#[cfg(feature = "default")]
 pub mod sqlca;
+#[cfg(feature = "default")]
 pub mod statement;
+#[cfg(feature = "default")]
 pub mod wire;
 
+#[cfg(feature = "default")]
 use std::net::TcpListener;
+#[cfg(feature = "default")]
 use std::time::Duration;
 
+#[cfg(feature = "default")]
 pub use client::{Client, QueryResult};
+#[cfg(feature = "default")]
 pub use session::{Answer, Event, Session};
+#[cfg(feature = "default")]
 use sql::{DB2, Dialect};
+#[cfg(feature = "default")]
 use transport::error::{Result, protocol_error};
+#[cfg(feature = "default")]
 use transport::sql::{Probe, Rows, SqlTransport};
+#[cfg(feature = "default")]
 use transport::{Login, Pooled, Taken};
+#[cfg(feature = "default")]
 use xcore::settings::{Read, Settings};
 
 /// The port a DB2 server listens on unless told otherwise.
+#[cfg(feature = "default")]
 pub const PORT: u16 = 50_000;
 
 /// A Location over an IBM DB2 server.
+#[cfg(feature = "default")]
 pub type Db2Transport = SqlTransport<Db2>;
 
 /// DB2's wire: this crate's DRDA client, guarded by TLS where asked for.
+#[cfg(feature = "default")]
 #[derive(Clone, Default)]
 pub struct Db2 {
     /// How a connection is guarded; in the clear where `None`.
@@ -96,6 +127,7 @@ pub struct Db2 {
     secured: Option<tls::ClientSettings>,
 }
 
+#[cfg(feature = "default")]
 impl Db2 {
     /// Every connection guarded by TLS, the server's certificate checked as
     /// `secured` says.
@@ -108,12 +140,13 @@ impl Db2 {
     }
 }
 
+#[cfg(feature = "default")]
 impl transport::sql::Wire for Db2 {
     type Client = Client;
 
     const NAME: &'static str = "db2";
-    const SCHEMES: &'static [&'static str] = &["db2"];
-    const SETTINGS: &'static Settings = configured::SETTINGS;
+    const SCHEMES: &'static [&'static str] = declaration::SCHEMES;
+    const SETTINGS: &'static Settings = declaration::SETTINGS;
     /// One database, one user with no password.
     const PROBE: Probe = Probe {
         database: "PROBE",
@@ -172,6 +205,7 @@ impl transport::sql::Wire for Db2 {
 ///
 /// # Errors
 /// Where the connection could not be accepted or the login failed.
+#[cfg(feature = "default")]
 pub fn accept_one(transport: &Db2Transport, listener: &TcpListener) -> Result<Session> {
     Session::accept(listener, transport.login(), transport.timeout())
         .map(|session| session.holding(transport.column()))
