@@ -1,10 +1,8 @@
-//! What a Location of this technology is configured with: its declaration,
-//! which its wire hands `transport::sql`'s `Configured`, built with the
-//! crate's `declaration` feature alone and the code behind the default
-//! (ADR-0064, amendments 2026-09-26, 2026-10-22 and 2026-11-26), for the
-//! library the surfaces load to carry (open problem 48): what every SQL
-//! Location declares (`transport::sql`), and whether its connections are
-//! guarded by TLS, which `configured::wire` reads.
+//! This technology's declaration: the transport guide's "The declaration",
+//! `module/core/capability/transport/doc/adding-a-transport.md`. Its wire
+//! hands it to `transport::sql`'s `Configured`. What every SQL Location
+//! declares stays `transport::sql`'s. Whether its connections are guarded by
+//! TLS is declared here, read by `configured::wire`.
 
 use transport::sql::accept::ACCEPT;
 use transport::sql::{COLUMN, DATABASE, ENCODING, QUERY, TIMEOUT, TLS, TLS_NAME, USER};
@@ -35,5 +33,6 @@ pub const SETTINGS: &Settings = &Settings {
     ],
 };
 
-/// The schemes a Location's address is entered with to choose this technology.
+/// This technology's schemes, as [`transport::Configured::SCHEMES`] defines
+/// them.
 pub const SCHEMES: &[&str] = &["db2"];
