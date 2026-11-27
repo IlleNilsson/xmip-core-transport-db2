@@ -104,11 +104,3 @@ speaks the same DRDA subset — two rows a query block, so a client must
 continue a query to read it whole — and, with `--features tls`, over TLS with
 a certificate from the estate's self-signed provisioning. No test here runs
 against an IBM DB2 server.
-
-## Toolchain
-
-`rust-toolchain.toml` pins the toolchain for the whole estate. Do not change it
-here.
-
-The included workflow is manual-only and calls the versioned shared workflow at
-`IlleNilsson/.github@v1`.
