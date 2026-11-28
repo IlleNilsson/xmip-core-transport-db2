@@ -15,22 +15,22 @@ path = "src/lib.rs"
 # (repository-model.md). DRDA is DSS frames carrying DDM objects, with
 # FD:OCA describing the rows. Its declaration takes what every SQL Location
 # declares (`transport::sql`).
-transport = { package = "xmip-core-transport", git = "https://github.com/IlleNilsson/xmip-core-transport", branch = "main" }
+transport = { workspace = true }
 # The settings this technology declares (xcore::settings), read through
 # transport::Configured (ADR-0064, amendment 2026-09-26).
-xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main" }
+xcore = { workspace = true }
 # The estate's encoding primitives: the byte cursor objects and rows are
 # read over, hex for a binary column, and the random correlation token.
-codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNilsson/xmip-core-library-codec", branch = "main", optional = true }
+codec = { workspace = true, optional = true }
 # SQL: the DB2 dialect — its literals, its binary form, the INSERT a send
 # writes and a far end takes apart, and a statement's verb.
-sql = { package = "xmip-core-library-sql", git = "https://github.com/IlleNilsson/xmip-core-library-sql", branch = "main", optional = true }
+sql = { workspace = true, optional = true }
 # The most a connection is read for (`net::MAX_BODY`), and a server's host
 # and default port (`net::authority`).
-net = { package = "xmip-core-library-net", git = "https://github.com/IlleNilsson/xmip-core-library-net", branch = "main", optional = true }
+net = { workspace = true, optional = true }
 # Optional, and only for `tls`: DRDA over the estate's TLS (ADR-0033), so a
 # forwarder on an edge device carries no TLS stack it does not speak.
-tls = { package = "xmip-core-library-tls", git = "https://github.com/IlleNilsson/xmip-core-library-tls", branch = "main", optional = true }
+tls = { workspace = true, optional = true }
 
 [features]
 # The code and its declaration: the transport guide's "The declaration",
@@ -53,11 +53,11 @@ test = false
 [dev-dependencies]
 # The loopback payloads the tests drive, from the capability's test
 # support and never a production build (ADR-0044).
-transport = { package = "xmip-core-transport", git = "https://github.com/IlleNilsson/xmip-core-transport", branch = "main", features = ["test-support"] }
+transport = { workspace = true, features = ["test-support"] }
 # A certificate for the TLS test, signed by the estate's own provisioning
 # (dogfooding: the node's self-signed source, not a third party's).
-provision = { package = "xmip-core-provision", git = "https://github.com/IlleNilsson/xmip-core-provision", branch = "main" }
-provision_self_signed = { package = "xmip-core-provision-self-signed", git = "https://github.com/IlleNilsson/xmip-core-provision-self-signed", branch = "main" }
+provision = { workspace = true }
+provision_self_signed = { workspace = true }
 
 [lints]
 workspace = true
